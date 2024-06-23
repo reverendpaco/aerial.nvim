@@ -6,6 +6,7 @@ local layout = require("aerial.layout")
 local navigation = require("aerial.navigation")
 local util = require("aerial.util")
 local window = require("aerial.window")
+local navstack = require("aerial.navigation_stack")
 local M = {}
 
 ---@class aerial.NavPanel
@@ -184,7 +185,7 @@ local function get_all_siblings(symbol)
 end
 
 ---@param panel aerial.NavPanel
-local function render_symbols(panel,parent)
+local function render_symbols(panel,special_item)
   local bufnr = panel.bufnr
   local lines = {}
   local highlights = {}
@@ -195,7 +196,7 @@ local function render_symbols(panel,parent)
     table.insert(lines, text)
     local text_cols = vim.api.nvim_strwidth(text)
     table.insert(highlights, { "Aerial" .. item.kind .. "Icon", i - 1, 0, kind:len() })
-    if item == parent then
+    if item == special_item then
         table.insert(highlights, {"AerialNavParent", i - 1, kind:len(), -1})
     else
         table.insert(highlights,
@@ -241,15 +242,39 @@ function AerialNav:focus_symbol(symbol)
   self.left.symbols,parentlnum = get_all_siblings(symbol.parent)
   self.right.symbols = symbol.children or {}
 
+  local possible_history = navstack.peek_location()
   render_symbols(self.left,symbol.parent)
-  render_symbols(self.main)
+  local relevant_sibling
+  if possible_history ~= nil then
+      for _,sibling in ipairs(siblings) do
+        if sibling.id == possible_history.to then
+            relevant_sibling = sibling
+        end
+      end
+      render_symbols(self.main,relevant_sibling)
+  else
+    render_symbols(self.main)
+  end
   if config.nav.preview and vim.tbl_isempty(self.right.symbols) then
     self:preview_symbol(self.right)
   else
     vim.api.nvim_win_set_buf(self.right.winid, self.right.bufnr)
-    render_symbols(self.right)
+    if possible_history ~= nil and symbol.id == possible_history.to then
+        local child_trace_idx = navstack.find_child_index_by_id(possible_history.from,symbol.children)
+        render_symbols(self.right,symbol.children[child_trace_idx])
+    else
+      render_symbols(self.right)
+    end
   end
 
+  if vim.api.nvim_win_is_valid(self.right.winid) then
+    if possible_history ~= nil and symbol.id == possible_history.to then
+      local child_trace_idx = navstack.find_child_index_by_id(possible_history.from,symbol.children)
+      if child_trace_idx ~= nil   then
+        vim.api.nvim_win_set_cursor(self.right.winid, { child_trace_idx, 0 })
+      end
+    end
+  end
   if vim.api.nvim_win_is_valid(self.left.winid) then
     vim.api.nvim_win_set_cursor(self.left.winid, { parentlnum, 0 })
   end
